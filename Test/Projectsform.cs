@@ -231,6 +231,9 @@ namespace Test
                 }
 
                 db.SaveProject(project);
+
+                // Csak sikeres, kereten belüli és elmentett projekt kerül a naplóba
+                AppLogger.ProjectAccepted(project);
                 MessageBox.Show("A(z) \"" + project.Name + "\" projekt elfogadva és elmentve.\n"
                                 + "Számított költség: " + project.CalculatedCost.ToString("N2") + " RON");
 

@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS ProjectAssignments (
                 }
                 tx.Commit();
             }
+
+            // Naplózás csak a sikeres mentés (Commit) UTÁN
+            foreach (var e in employees)
+                AppLogger.DbInsert("Employees", e.Id.ToString());
         }
 
         public List<Employee> GetAllEmployees()
@@ -189,6 +193,11 @@ CREATE TABLE IF NOT EXISTS ProjectAssignments (
 
                 tx.Commit();
             }
+
+            // Naplózás csak a sikeres mentés (Commit) UTÁN
+            AppLogger.DbInsert("Projects", project.Id.ToString());
+            foreach (var a in project.Assignments)
+                AppLogger.DbInsert("ProjectAssignments", "ProjectId=" + project.Id + ",EmployeeId=" + a.EmployeeId);
         }
 
         /// <summary>Az elfogadott projektek visszatöltése; a munkatársakat a már betöltött listából keresi ki.</summary>

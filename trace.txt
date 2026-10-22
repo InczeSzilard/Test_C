@@ -1,0 +1,5 @@
+[2026-10-22 14:14:42.4704837] System.Data.SQLite (Preload): Native library pre-loader is trying to load native SQLite library "C:\Users\szila\Downloads\Test\Test\bin\Debug\x86\SQLite.Interop.dll"...
+2026-10-22 14:16:24 | DB_INSERT | Table=Projects | Id=2
+2026-10-22 14:16:24 | DB_INSERT | Table=ProjectAssignments | Id=ProjectId=2,EmployeeId=57
+2026-10-22 14:16:24 | DB_INSERT | Table=ProjectAssignments | Id=ProjectId=2,EmployeeId=13
+2026-10-22 14:16:24 | PROJECT_ACCEPTED | ProjectId=2 | Name=Cukormero | EstimatedBudget=8000 | CalculatedCost=7358.75 | PmEmployeeId=86 | PmHours=28 | Developers=[EmployeeId=57 Hours=70, EmployeeId=13 Hours=70]

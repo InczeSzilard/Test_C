@@ -23,6 +23,9 @@ namespace Test
         {
             InitializeComponent();
 
+            // Trace naplózás indítása (trace.txt) – az adatbázis előtt
+            AppLogger.Init();
+
             db = new Database();
             generator = new EmployeeGenerater(db);
 
