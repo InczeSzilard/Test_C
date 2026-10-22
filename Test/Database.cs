@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using System.IO;
+using System.Linq;
 
 namespace Test
 {
@@ -10,7 +10,7 @@ namespace Test
         private readonly string connectionString;
 
         // A fájl a program mellé (bin\Debug) kerül, így újraindítás után is megmarad
-        public Database(string path = "projektek.db")
+        public Database(string path = "agency.db")
         {
             connectionString = "Data Source=" + path + ";Version=3;";
             CreateTables();
@@ -20,6 +20,9 @@ namespace Test
         {
             var conn = new SQLiteConnection(connectionString);
             conn.Open();
+            // SQLite-ban a külső kulcsok ellenőrzését kapcsolatonként be kell kapcsolni
+            using (var cmd = new SQLiteCommand("PRAGMA foreign_keys = ON;", conn))
+                cmd.ExecuteNonQuery();
             return conn;
         }
 
@@ -31,15 +34,33 @@ namespace Test
                 cmd.CommandText = @"
 CREATE TABLE IF NOT EXISTS Employees (
     Id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    Name          TEXT NOT NULL,
-    Role          TEXT NOT NULL CHECK (Role IN ('Programmer','ProjectManager','Director','HrDirector')),
-    Seniority     TEXT NULL     CHECK (Seniority IN ('Junior','Mid','Senior')),
-    MonthlySalary REAL NOT NULL CHECK (MonthlySalary > 0),
+    Name          TEXT    NOT NULL,
+    Role          TEXT    NOT NULL CHECK (Role IN ('Programmer','ProjectManager','Director','HrDirector')),
+    Seniority     TEXT    NULL     CHECK (Seniority IN ('Junior','Mid','Senior')),
+    MonthlySalary REAL    NOT NULL CHECK (MonthlySalary > 0),
     CHECK ((Role = 'Programmer') = (Seniority IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS Projects (
+    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name            TEXT    NOT NULL,
+    EstimatedBudget REAL    NOT NULL CHECK (EstimatedBudget > 0),
+    CalculatedCost  REAL    NOT NULL CHECK (CalculatedCost >= 0),
+    PmEmployeeId    INTEGER NOT NULL REFERENCES Employees(Id),
+    PmHours         REAL    NOT NULL CHECK (PmHours > 0)
+);
+
+CREATE TABLE IF NOT EXISTS ProjectAssignments (
+    ProjectId      INTEGER NOT NULL REFERENCES Projects(Id) ON DELETE CASCADE,
+    EmployeeId     INTEGER NOT NULL REFERENCES Employees(Id),
+    AllocatedHours REAL    NOT NULL CHECK (AllocatedHours > 0),
+    PRIMARY KEY (ProjectId, EmployeeId)
 );";
                 cmd.ExecuteNonQuery();
             }
         }
+
+        // ---------------- Munkatársak ----------------
 
         // Kulcs pl. "Programmer:Junior", "ProjectManager:"
         public static string Key(string role, string seniority)
@@ -102,12 +123,12 @@ CREATE TABLE IF NOT EXISTS Employees (
             using (var r = cmd.ExecuteReader())
             {
                 while (r.Read())
-                    list.Add(Map(r));
+                    list.Add(MapEmployee(r));
             }
             return list;
         }
 
-        private static Employee Map(SQLiteDataReader r)
+        private static Employee MapEmployee(SQLiteDataReader r)
         {
             int id = Convert.ToInt32(r.GetValue(0));
             string name = r.GetString(1);
@@ -128,6 +149,99 @@ CREATE TABLE IF NOT EXISTS Employees (
                 default:
                     throw new InvalidOperationException("Ismeretlen munkakör: " + role);
             }
+        }
+
+        // ---------------- Projektek ----------------
+
+        /// <summary>Elfogadott projekt mentése a beosztásaival együtt, egy tranzakcióban.</summary>
+        public void SaveProject(Project project)
+        {
+            using (var conn = Open())
+            using (var tx = conn.BeginTransaction())
+            {
+                using (var cmd = new SQLiteCommand(conn))
+                {
+                    cmd.Transaction = tx;
+                    cmd.CommandText = @"INSERT INTO Projects (Name, EstimatedBudget, CalculatedCost, PmEmployeeId, PmHours)
+                                        VALUES (@name, @budget, @cost, @pm, @pmHours);
+                                        SELECT last_insert_rowid();";
+                    cmd.Parameters.AddWithValue("@name", project.Name);
+                    cmd.Parameters.AddWithValue("@budget", (double)project.EstimatedBudget);
+                    cmd.Parameters.AddWithValue("@cost", (double)project.CalculatedCost);
+                    cmd.Parameters.AddWithValue("@pm", project.ProjectManager.Id);
+                    cmd.Parameters.AddWithValue("@pmHours", (double)project.PmHours);
+
+                    project.SetId(Convert.ToInt32(cmd.ExecuteScalar()));
+                }
+
+                foreach (var a in project.Assignments)
+                {
+                    using (var cmd = new SQLiteCommand(
+                        @"INSERT INTO ProjectAssignments (ProjectId, EmployeeId, AllocatedHours)
+                          VALUES (@projectId, @employeeId, @hours);", conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@projectId", project.Id);
+                        cmd.Parameters.AddWithValue("@employeeId", a.EmployeeId);
+                        cmd.Parameters.AddWithValue("@hours", (double)a.AllocatedHours);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                tx.Commit();
+            }
+        }
+
+        /// <summary>Az elfogadott projektek visszatöltése; a munkatársakat a már betöltött listából keresi ki.</summary>
+        public List<Project> GetAllProjects(List<Employee> employees)
+        {
+            var byId = employees.ToDictionary(e => e.Id);
+            var projects = new Dictionary<int, Project>();
+
+            using (var conn = Open())
+            {
+                using (var cmd = new SQLiteCommand(
+                    "SELECT Id, Name, EstimatedBudget, PmEmployeeId, PmHours FROM Projects ORDER BY Id", conn))
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        int id = Convert.ToInt32(r.GetValue(0));
+                        int pmId = Convert.ToInt32(r.GetValue(3));
+
+                        Employee pmEmployee;
+                        byId.TryGetValue(pmId, out pmEmployee);
+                        var pm = pmEmployee as ProjectManager;
+                        if (pm == null)
+                            throw new InvalidOperationException("A(z) " + id + ". projekt PM-je nem található.");
+
+                        projects.Add(id, new Project(
+                            id,
+                            r.GetString(1),
+                            Convert.ToDecimal(r.GetValue(2)),
+                            pm,
+                            Convert.ToDecimal(r.GetValue(4))));
+                    }
+                }
+
+                using (var cmd = new SQLiteCommand(
+                    "SELECT ProjectId, EmployeeId, AllocatedHours FROM ProjectAssignments", conn))
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        Project project;
+                        Employee emp;
+                        if (projects.TryGetValue(Convert.ToInt32(r.GetValue(0)), out project) &&
+                            byId.TryGetValue(Convert.ToInt32(r.GetValue(1)), out emp) &&
+                            emp is Programmer)
+                        {
+                            project.AddAssignment((Programmer)emp, Convert.ToDecimal(r.GetValue(2)));
+                        }
+                    }
+                }
+            }
+
+            return projects.Values.ToList();
         }
     }
 }

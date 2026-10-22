@@ -1,17 +1,21 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
-using Test;
 
 namespace Test
 {
-    // A Designerben tegyél a formra:
-    //   Button       -> Name: btnGenerate, Text: Generate employees
-    //   DataGridView -> Name: dgvEmployees (ReadOnly = true)
-    //   Label        -> Name: lblCount
-    // A Click eseményt itt kódból kötöm be, ezért a gombra NE kattints duplán a Designerben.
+    // 1. ablak: a Designerben felrakott vezérlőket használja.
+    // Vezérlők nevei (Properties -> (Name)):
+    //   DataGridView -> dgvEmployees
+    //   Button       -> btnGenerate   ("Generate employees")
+    //   Label        -> lblCount
+    //   Button       -> btnNext       ("Next->")
+    // Az eseményeket itt kódból kötöm be, ezért a gombokra NE kattints duplán a Designerben.
     public partial class Form1 : Form
     {
+        private const int RequiredEmployees = 100;
+
         private readonly Database db;
         private readonly EmployeeGenerater generator;
 
@@ -22,11 +26,54 @@ namespace Test
             db = new Database();
             generator = new EmployeeGenerater(db);
 
-            btnGenerate.Click += btnGenerate_Click;
-            LoadEmployees();
+            // A táblázat beállításai
+            dgvEmployees.ReadOnly = true;
+            dgvEmployees.AllowUserToAddRows = false;
+            dgvEmployees.AllowUserToDeleteRows = false;
+            dgvEmployees.RowHeadersVisible = false;
+            dgvEmployees.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvEmployees.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvEmployees.DataBindingComplete += (s, e) =>
+            {
+                foreach (DataGridViewColumn col in dgvEmployees.Columns)
+                    col.HeaderText = col.HeaderText.Replace('_', ' ');
+            };
+
+            btnGenerate.Click += BtnGenerate_Click;
+            btnNext.Click += BtnNext_Click;
+
+            try
+            {
+                LoadEmployees();
+            }
+            catch (Exception ex)
+            {
+                UiHelpers.ShowError("Hiba az adatok betöltésekor: " + ex.Message);
+            }
         }
 
-        private void btnGenerate_Click(object sender, EventArgs e)
+        private void LoadEmployees()
+        {
+            List<Employee> employees = db.GetAllEmployees();
+
+            dgvEmployees.DataSource = employees
+                .Select(x => new
+                {
+                    x.Id,
+                    Név = x.Name,
+                    Munkakör = x.GetRoleName(),
+                    Senioritás = x is Programmer ? ((Programmer)x).Seniority.ToString() : "—",
+                    Havi_bér_RON = x.MonthlySalary
+                })
+                .ToList();
+
+            lblCount.Text = "Munkatársak: " + employees.Count;
+
+            // Tovább csak akkor, ha már megvan a kötelező adathalmaz
+            btnNext.Enabled = employees.Count >= RequiredEmployees;
+        }
+
+        private void BtnGenerate_Click(object sender, EventArgs e)
         {
             try
             {
@@ -39,27 +86,20 @@ namespace Test
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Hiba a generálás közben: " + ex.Message, "Hiba",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UiHelpers.ShowError("Hiba a generálás közben: " + ex.Message);
             }
         }
 
-        private void LoadEmployees()
+        private void BtnNext_Click(object sender, EventArgs e)
         {
-            var employees = db.GetAllEmployees();
-
-            dgvEmployees.DataSource = employees
-                .Select(x => new
-                {
-                    x.Id,
-                    Név = x.Name,
-                    Munkakör = x.GetRoleName(),
-                    Havi_bér_RON = x.MonthlySalary,
-                    Órabér_RON = x.GetHourlyRate()
-                })
-                .ToList();
-
-            lblCount.Text = "Munkatársak: " + employees.Count;
+            Hide();
+            using (var projectsForm = new ProjectsForm(db))
+            {
+                projectsForm.ShowDialog();
+            }
+            // A projektek ablak bezárása után visszajövünk ide
+            Show();
+            LoadEmployees();
         }
     }
 }
