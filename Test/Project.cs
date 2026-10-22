@@ -15,6 +15,7 @@ namespace Test
             get { return Programmer.Id; }
         }
 
+        // HourlyRate × AllocatedHours
         public decimal Cost
         {
             get { return Programmer.GetHourlyRate() * AllocatedHours; }
@@ -25,7 +26,7 @@ namespace Test
             if (programmer == null)
                 throw new ArgumentNullException("programmer", "A programozó megadása kötelező.");
             if (allocatedHours <= 0)
-                throw new ArgumentException("Az órák számának pozitívnak kell lennie.");
+                throw new ArgumentException("A tervezett óraszámnak pozitívnak kell lennie.");
 
             Programmer = programmer;
             AllocatedHours = allocatedHours;
@@ -34,9 +35,11 @@ namespace Test
 
     public class Project
     {
+        // PmHours = TotalDeveloperHours × 0.20
+        public const decimal PmHourRatio = 0.20m;
+
         private string name;
         private decimal estimatedBudget;
-        private decimal pmHours;
         private readonly List<ProjectAssignment> assignments = new List<ProjectAssignment>();
 
         public int Id { get; private set; }
@@ -67,23 +70,46 @@ namespace Test
         // Kötelező projektmenedzser
         public ProjectManager ProjectManager { get; private set; }
 
-        public decimal PmHours
-        {
-            get { return pmHours; }
-            private set
-            {
-                if (value <= 0)
-                    throw new ArgumentException("A PM óráinak száma pozitív kell legyen.");
-                pmHours = value;
-            }
-        }
-
         public IReadOnlyList<ProjectAssignment> Assignments
         {
             get { return assignments.AsReadOnly(); }
         }
 
-        public Project(int id, string name, decimal estimatedBudget, ProjectManager projectManager, decimal pmHours)
+        // TotalDeveloperHours = a programozók AllocatedHours értékeinek összege
+        public decimal TotalDeveloperHours
+        {
+            get { return assignments.Sum(a => a.AllocatedHours); }
+        }
+
+        // PmHours = TotalDeveloperHours × 0.20
+        public decimal PmHours
+        {
+            get { return TotalDeveloperHours * PmHourRatio; }
+        }
+
+        // CalculatedCost = Σ(HourlyRate × AllocatedHours) + PM HourlyRate × PmHours
+        public decimal CalculatedCost
+        {
+            get
+            {
+                decimal developerCost = assignments.Sum(a => a.Cost);
+                decimal pmCost = ProjectManager.GetHourlyRate() * PmHours;
+                return Math.Round(developerCost + pmCost, 2);
+            }
+        }
+
+        public bool IsWithinBudget
+        {
+            get { return CalculatedCost <= EstimatedBudget; }
+        }
+
+        // Elfogadhatóság: CalculatedCost ≤ EstimatedBudget, van PM és legalább egy fejlesztő
+        public bool IsAcceptable
+        {
+            get { return ProjectManager != null && assignments.Count > 0 && IsWithinBudget; }
+        }
+
+        public Project(int id, string name, decimal estimatedBudget, ProjectManager projectManager)
         {
             if (projectManager == null)
                 throw new ArgumentNullException("projectManager", "Projektmenedzser megadása kötelező.");
@@ -92,30 +118,14 @@ namespace Test
             Name = name;
             EstimatedBudget = estimatedBudget;
             ProjectManager = projectManager;
-            PmHours = pmHours;
         }
 
         public void AddAssignment(Programmer programmer, decimal allocatedHours)
         {
             if (programmer != null && assignments.Any(a => a.EmployeeId == programmer.Id))
-                throw new InvalidOperationException("Ez a programozó már szerepel a projektben.");
+                throw new InvalidOperationException("Ez a fejlesztő már szerepel a projektben.");
 
             assignments.Add(new ProjectAssignment(programmer, allocatedHours));
-        }
-
-        // Tervezett személyi költség: PM órabér * PM órák + programozók órabér * órák
-        public decimal CalculatedCost
-        {
-            get
-            {
-                decimal cost = ProjectManager.GetHourlyRate() * PmHours + assignments.Sum(a => a.Cost);
-                return Math.Round(cost, 2);
-            }
-        }
-
-        public bool IsWithinBudget
-        {
-            get { return CalculatedCost <= EstimatedBudget; }
         }
 
         // Csak az adatbázis-réteg használja mentés után

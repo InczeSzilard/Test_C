@@ -44,7 +44,7 @@ namespace Test
 
     public abstract class Employee : Person
     {
-        public const decimal MonthlyWorkHours = 168m;
+        public const decimal MonthlyWorkHours = 160m;
 
         private decimal monthlySalary;
 
@@ -66,7 +66,7 @@ namespace Test
 
         public virtual decimal GetHourlyRate()
         {
-            return Math.Round(MonthlySalary / MonthlyWorkHours, 2);
+            return MonthlySalary / MonthlyWorkHours; // HourlyRate = MonthlySalary / 160
         }
 
         // Csak az adatbázis-réteg használja mentés után

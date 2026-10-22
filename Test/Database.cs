@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS ProjectAssignments (
             using (var conn = Open())
             {
                 using (var cmd = new SQLiteCommand(
-                    "SELECT Id, Name, EstimatedBudget, PmEmployeeId, PmHours FROM Projects ORDER BY Id", conn))
+                    "SELECT Id, Name, EstimatedBudget, PmEmployeeId FROM Projects ORDER BY Id", conn))
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read())
@@ -214,12 +214,12 @@ CREATE TABLE IF NOT EXISTS ProjectAssignments (
                         if (pm == null)
                             throw new InvalidOperationException("A(z) " + id + ". projekt PM-je nem található.");
 
+                        // A PmHours a beosztásokból számolódik (TotalDeveloperHours × 0.20)
                         projects.Add(id, new Project(
                             id,
                             r.GetString(1),
                             Convert.ToDecimal(r.GetValue(2)),
-                            pm,
-                            Convert.ToDecimal(r.GetValue(4))));
+                            pm));
                     }
                 }
 

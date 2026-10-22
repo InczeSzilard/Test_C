@@ -21,7 +21,7 @@ namespace Test
         private TextBox projectNameBox;
         private NumericUpDown budgetInput;
         private ComboBox pmCombo;
-        private NumericUpDown pmHoursInput;
+        private Label hoursLabel;
         private ComboBox programmerCombo;
         private NumericUpDown programmerHoursInput;
         private Button addMemberButton;
@@ -84,13 +84,13 @@ namespace Test
             projectNameBox = new TextBox();
             budgetInput = UiHelpers.CreateNumber(0, 100000000, 1000, 0);
             pmCombo = UiHelpers.CreateEmployeeCombo();
-            pmHoursInput = UiHelpers.CreateNumber(1, 10000, 1, 40);
             programmerCombo = UiHelpers.CreateEmployeeCombo();
             programmerHoursInput = UiHelpers.CreateNumber(1, 10000, 1, 80);
             programmerHoursInput.Width = 90;
             addMemberButton = new Button { Text = "Hozzáadás", AutoSize = true };
             removeMemberButton = new Button { Text = "Kijelölt eltávolítása", AutoSize = true };
             teamGrid = UiHelpers.CreateGrid();
+            hoursLabel = new Label { AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
             costLabel = new Label { AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 8, 3, 3) };
             budgetStatusLabel = new Label { AutoSize = true, Margin = new Padding(3, 3, 3, 8) };
             acceptButton = new Button { Text = "Accept project", AutoSize = true, MinimumSize = new Size(140, 32) };
@@ -102,7 +102,6 @@ namespace Test
             UiHelpers.AddRow(form, "Projekt neve", projectNameBox);
             UiHelpers.AddRow(form, "Becsült keret (RON)", budgetInput);
             UiHelpers.AddRow(form, "Projektmenedzser", pmCombo);
-            UiHelpers.AddRow(form, "PM órák", pmHoursInput);
             UiHelpers.AddWide(form, new Label
             {
                 Text = "Fejlesztőcsapat",
@@ -114,6 +113,7 @@ namespace Test
             UiHelpers.AddRow(form, "AllocatedHours", hoursRow);
             UiHelpers.AddWide(form, teamGrid, true);
             UiHelpers.AddWide(form, removeMemberButton, false);
+            UiHelpers.AddWide(form, hoursLabel, false);
             UiHelpers.AddWide(form, costLabel, false);
             UiHelpers.AddWide(form, budgetStatusLabel, false);
             UiHelpers.AddWide(form, acceptButton, false);
@@ -131,7 +131,6 @@ namespace Test
             projectNameBox.TextChanged += (s, e) => UpdateCost();
             budgetInput.ValueChanged += (s, e) => UpdateCost();
             pmCombo.SelectedIndexChanged += (s, e) => UpdateCost();
-            pmHoursInput.ValueChanged += (s, e) => UpdateCost();
             addMemberButton.Click += AddMemberButton_Click;
             removeMemberButton.Click += RemoveMemberButton_Click;
             acceptButton.Click += AcceptButton_Click;
@@ -219,14 +218,15 @@ namespace Test
             try
             {
                 var pm = (ProjectManager)pmCombo.SelectedItem;
-                var project = new Project(0, projectNameBox.Text, budgetInput.Value, pm, pmHoursInput.Value);
+                var project = new Project(0, projectNameBox.Text, budgetInput.Value, pm);
                 foreach (var a in draftTeam)
                     project.AddAssignment(a.Programmer, a.AllocatedHours);
 
                 // Csak a keretbe beleférő projekt fogadható el
-                if (!project.IsWithinBudget)
+                // Csak elfogadható projekt menthető: van PM, legalább egy fejlesztő, és belefér a keretbe
+                if (!project.IsAcceptable)
                 {
-                    UiHelpers.ShowWarning("A projekt költsége meghaladja a keretet, nem fogadható el.");
+                    UiHelpers.ShowWarning("A projekt nem fér bele a költségkeretbe.");
                     return;
                 }
 
@@ -256,7 +256,7 @@ namespace Test
                     Név = a.Programmer.Name,
                     Senioritás = a.Programmer.Seniority.ToString(),
                     Órák = a.AllocatedHours,
-                    Órabér = a.Programmer.GetHourlyRate(),
+                    Órabér = Math.Round(a.Programmer.GetHourlyRate(), 2),
                     Költség_RON = Math.Round(a.Cost, 2)
                 })
                 .ToList();
@@ -267,23 +267,36 @@ namespace Test
         private void UpdateCost()
         {
             var pm = pmCombo.SelectedItem as ProjectManager;
-            decimal pmCost = pm != null ? pm.GetHourlyRate() * pmHoursInput.Value : 0m;
-            decimal cost = Math.Round(pmCost + draftTeam.Sum(a => a.Cost), 2);
+
+            // TotalDeveloperHours = Σ AllocatedHours, PmHours = TotalDeveloperHours × 0.20
+            decimal developerHours = draftTeam.Sum(a => a.AllocatedHours);
+            decimal pmHours = developerHours * Project.PmHourRatio;
+
+            // CalculatedCost = Σ(HourlyRate × AllocatedHours) + PM HourlyRate × PmHours
+            decimal developerCost = draftTeam.Sum(a => a.Cost);
+            decimal pmCost = pm != null ? pm.GetHourlyRate() * pmHours : 0m;
+            decimal cost = Math.Round(developerCost + pmCost, 2);
             decimal budget = budgetInput.Value;
 
+            hoursLabel.Text = "Fejlesztői órák: " + developerHours.ToString("0.##")
+                              + "   |   PM órák: " + pmHours.ToString("0.##")
+                              + " (20% × " + developerHours.ToString("0.##") + ")";
             costLabel.Text = "Számított költség: " + cost.ToString("N2") + " RON";
 
+            bool overBudget = budget > 0 && cost > budget;
+
             string problem = null;
-            if (string.IsNullOrWhiteSpace(projectNameBox.Text))
+            if (overBudget)
+                problem = "A projekt nem fér bele a költségkeretbe. Különbség: "
+                          + (cost - budget).ToString("N2") + " RON";
+            else if (string.IsNullOrWhiteSpace(projectNameBox.Text))
                 problem = "Add meg a projekt nevét.";
             else if (budget <= 0)
                 problem = "Add meg a becsült költségkeretet.";
             else if (pm == null)
                 problem = "Válassz projektmenedzsert.";
             else if (draftTeam.Count == 0)
-                problem = "Adj hozzá legalább egy programozót.";
-            else if (cost > budget)
-                problem = "Túllépi a keretet " + (cost - budget).ToString("N2") + " RON-nal.";
+                problem = "Adj hozzá legalább egy fejlesztőt.";
 
             if (problem == null)
             {
@@ -293,9 +306,10 @@ namespace Test
             else
             {
                 budgetStatusLabel.Text = problem;
-                budgetStatusLabel.ForeColor = cost > budget && budget > 0 ? Color.Firebrick : SystemColors.GrayText;
+                budgetStatusLabel.ForeColor = overBudget ? Color.Firebrick : SystemColors.GrayText;
             }
 
+            // Keretet túllépő vagy hiányos projekt nem menthető
             acceptButton.Enabled = problem == null;
         }
 
@@ -304,7 +318,6 @@ namespace Test
             projectNameBox.Clear();
             budgetInput.Value = 0;
             pmCombo.SelectedIndex = -1;
-            pmHoursInput.Value = 40;
             draftTeam.Clear();
             RefreshTeam();
         }
